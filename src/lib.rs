@@ -91,13 +91,18 @@ where
 }
 
 /// Create a new exporter pipeline builder.
-pub fn new_pipeline(
+pub fn new_pipeline<B>(
     api_key: impl Into<HoneycombApiKey>,
     dataset: String,
-) -> HoneycombPipelineBuilder {
+    executor: Arc<tokio::runtime::Runtime>,
+    block_on: B,
+) -> HoneycombPipelineBuilder
+where
+    B: Fn(BoxFuture<()>) + Send + Sync + 'static,
+{
     HoneycombPipelineBuilder {
         api_key: api_key.into(),
-        block_on: Arc::new(|f| tokio::runtime::Handle::current().block_on(f)),
+        block_on: Arc::new(block_on),
         dataset,
         trace_config: None,
         transmission_options: libhoney::transmission::Options {
@@ -109,7 +114,7 @@ pub fn new_pipeline(
             ..Default::default()
         },
         on_span_start: None,
-        executor: Arc::new(TokioExecutor),
+        executor: Arc::new(TokioExecutor(executor)),
     }
 }
 
@@ -606,7 +611,7 @@ impl Drop for HoneycombSpanExporter {
     }
 }
 
-struct TokioExecutor;
+struct TokioExecutor(Arc<tokio::runtime::Runtime>);
 
 impl futures::task::Spawn for TokioExecutor {
     fn spawn_obj(
@@ -614,7 +619,7 @@ impl futures::task::Spawn for TokioExecutor {
         future: futures::task::FutureObj<'static, ()>,
     ) -> Result<(), futures::task::SpawnError> {
         debug!("We're spawning a future");
-        tokio::spawn(future);
+        self.0.spawn(future);
         Ok(())
     }
 }
